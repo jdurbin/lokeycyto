@@ -1,0 +1,21 @@
+#!/usr/bin/env groovy 
+
+
+
+
+
+
+
+
+
+double ComputeKS(double[] h1,double[] h2){
+  
+  cumulativeDist = []
+  (0..<h1.length).each{
+    
+    
+  }  
+}
+
+
+//122345567899

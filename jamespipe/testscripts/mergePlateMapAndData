@@ -1,0 +1,22 @@
+#!/usr/bin/env groovy 
+
+/**
+* Merge the platemap.csv file with the data.tab file.  The result is a file
+* that flattens out the 3D (or 4D, with replicates) matrix of values like:
+* 
+* WellID FeatureName CompoundName Value
+* 
+* This is an inefficient way to save this info in a file, but 
+* it is easy to read in terms of functional categories.   
+*
+*/ 
+
+import durbin.cyto.*;
+
+plateMapFile = args[0]
+dataFile = args[1]
+
+data = DataReader.mergePlateMapAndData(plateMapFile,dataFile)
+
+// Drat... Benomyl 10 Molar has 
+println data['WellName']['Benomyl']['10'][1]

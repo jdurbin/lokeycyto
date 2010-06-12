@@ -1,0 +1,200 @@
+#!/usr/bin/env groovy 
+/*
+* 
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+import javax.swing.*;
+import java.awt.*;
+
+import durbin.util.*;
+import durbin.stat.KolmogorovSmirnov as KS
+
+import cern.jet.stat.Descriptive as Desc
+import cern.colt.list.DoubleArrayList
+
+measureType = args[0]     // The kind of control vs titration measure to use
+data = args[1]
+control = args[2]
+outFile = args[3]
+
+
+
+// Create an h2 jdbc database. 
+// mem says in-memory db, and call it what you like, here db1 
+def db = Sql.newInstance("jdbc:h2:mem:data","org.h2.Driver")
+System.err.print "Reading data table $data..."
+db.execute("create table data as select * from csvread('$data')" as String)
+db.execute("create table control as select * from csvread('$control')" as String)
+System.err.println "done."
+
+// Get all of the feature names from the table...
+query = """
+select column_name from information_schema.columns where table_name = 'DATA';"""
+columnNames = query(db,query)
+
+// Get all of the distinct molarities from the table...
+// In the table, they are just stored as text strings, I need to sort
+// them numerically, though...
+query = """
+select distinct(molarity) from data;"""
+molarities = numericalSort(query(db,query))
+
+// Get all of the feature names from the table...  It will be assumed that these 
+// match between the data and control tables...
+query = """
+select column_name from information_schema.columns where table_name = 'DATA';"""
+columnNames = query(db,query)
+
+// Some columns are not actual features, so these will be passed on unprocessed. 
+skipColumns = ['ORIENTATIONIMASUMMARY','COMPOUND','MOLARITY','CELLID','INSTANCE','PLATEID',
+'RUNSETTINGSID','SERIESID','SITEID','WELLNAME','WELLX','WELLY'] as Set
+
+// Take [1.2 2.3] and make "1.2" DOUBLE,"2.3" DOUBLE
+columnDef = molarities.collect{"\"$it\" DOUBLE"}.join(",")
+columnDef = "Feature VARCHAR,"+columnDef
+println "ColumnDef: $columnDef"
+db.execute("create table results($columnDef)" as String)
+
+
+// for each feature,molarity pair, get a distribution of values for that 
+// pair and compare it to the control distribution with the KS statistic...
+columnNames.each{cName->
+
+  print "Processing $cName..."
+  
+  // Skip non feature columns...
+  if (skipColumns.contains(cName)) {
+    println "skip."
+    return;
+  }      
+    
+  // KJD:  Exploratory test... only look at per-cell values... or conversely.
+  //if (cName.startsWith("CELL")) {
+  //  println "skip."
+  //  return;
+  //}  
+    
+  def controlvalues
+  query  = """select $cName from control;"""
+  controlValues = query(db,query)
+ 
+  // They are lowly strings now, convert them to doubles...
+  if (controlValues != null) controlValues = controlValues*.toDouble()
+  controlValues = controlValues as double[]
+     
+  // Compute the standard deviation of the control values for this feature. 
+  cvAL = new DoubleArrayList(controlValues)
+  cvVar = Desc.sampleVariance(cvAL,Desc.mean(cvAL))
+  controlValuesStdDev = Desc.standardDeviation(cvVar)
+  if (controlValuesStdDev == 0) controlValuesStdDev = 0.00001; // Just to avoid unsightly /0  
+  
+  //println "cvVar: $cvVar  cvStdDev: $controlValuesStdDev"  
+    
+  // List of values vs Molarity
+  KSList = []
+  molarities.each{molarity->
+    query = """
+    select $cName from data where molarity=$molarity;"""  
+    values = query(db,query)
+    if (values != null){    
+      values = values*.toDouble()
+      values = values as double[]  
+      
+      def measure
+      switch(measureType){
+        case 'meandiff':
+          measure = meandiff(values,controlValues); break;
+        case 'ksdist':
+          measure = KS.signedDistance(values,controlValues); break;
+        case 'ksprob':
+          // Compute Kolmogorov Smirnov statistic for control vs experiment      
+          measure = KS.test(values,controlValues); break;
+        case 'ksscaled':
+          // Divide by the standard deviation of the control values
+          ksdist = KS.signedDistance(values,controlValues)
+          measure = ksdist/controlValuesStdDev; break;
+      }
+      KSList.add(measure)      
+    } 
+  }  
+    
+  //println "**** KSList.size="+KSList.size()
+  //print ".. adding row..."
+  row = KSList.join(",")
+  row = "\'$cName\',$row" as String
+  //println "row: $row"
+  // Add a row to our new table...  
+  query = """insert into results values($row);""" as String
+  //println "\ninsert row: $row"
+  db.execute(query)
+  println "done."
+}
+
+print "Writing results to $outFile.."
+query = """CALL CSVWRITE('$outFile', 'SELECT * FROM results');""" as String
+db.execute(query)
+println "done."
+
+
+/******************************************************************************/
+
+/**
+* Perform the sql query and return the results as a list. 
+*/ 
+def query(db,query){
+  rlist = []
+  db.eachRow(query as String){
+    if ((it[0] == null) || (it[0] == 'null')) return(null)
+    rlist << it[0]
+  }
+  return(rlist)
+}
+
+/**
+* Returns the difference in the means of the two lists. 
+*/ 
+def meandiff(v1,v2){
+  s1 = 0;c1=0;
+  v1.each{
+    s1+=it
+    c1++
+  }
+  m1 = s1/c1;
+  
+  s2 = 0;c2=0;
+   v2.each{
+     s2+=it
+     c2++
+   }
+   m2 = s2/c2;
+  diff = m1-m2; 
+  // Want to normalize it, so that the values are somewhat comparable..
+  rval = 0.000000001; // Just to prevent ugly divide by zero. 
+  if (m2 != 0) rval = diff/m2
+  return(rval);  
+}
+
+
+/**
+* Sorts a list of strings numerically.  Assumes that the strings 
+* contain valid numbers when interpreted as doubles. 
+* 
+* This just makes a map from the number version to the string version
+* then sorts the map and extracts the sorted values. 
+*/
+def numericalSort(strList){
+  rvals = []
+  map = [:]
+  strList.each{map[it as double] = it}
+  map = map.sort()
+  map.each{k,v->rvals<<v}
+  return(rvals);
+}
+
+
+/* 
+time ./scripts/ksStat percompound/Benomyl.csv percompound/Blank.csv ks.out 
+real	0m32.826s
+*/

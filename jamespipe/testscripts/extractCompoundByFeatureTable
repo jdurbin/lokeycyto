@@ -1,0 +1,103 @@
+#!/usr/bin/env groovy 
+/*
+* Join platemap and data files using the h2 database library to create 
+* on-the-fly databases from csv files.  Surprisngly simple and effective. 
+*
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+database = args[0]
+
+// connect to the file-based database specified...
+def db = Sql.newInstance("jdbc:h2:$database","org.h2.Driver")
+
+query = """select distinct(pm.Compound) from pm;"""
+compounds = query(db,query)
+println compounds
+
+query = "select distinct(pm.molarity) from pm;"
+molarities = query(db,query)
+println molarities
+
+//printTableHeading(compounds,molarities)
+
+features.each{feature->
+  
+  controlDist = getControlDistribution(db,feature)   
+  // Optional exponential decay smoothing... 
+  
+  println "$feature"
+  
+  compounds.each{compound->
+    molarities.each{molarity->
+      print ","
+      experimentalDist = getExperimentalDistribution(db,compound,molarity,feature)
+      stat = computeStat(experimentalDistribution,controlDistribution)
+      print "$stat"
+    }
+    println ""    
+  }  
+}
+
+
+
+/**
+*
+*/ 
+def getControlDistribution(db,feature){  
+   query  = """
+   select data.$feature from pm,data
+   where pm.WellName = data.WellName and 
+   
+   """
+
+   controlValues = query(db,query)
+
+   // They are lowly strings now, convert them to doubles...
+   if (controlValues != null) controlValues = controlValues*.toDouble()
+   controlValues = controlValues as double[]
+}
+
+
+
+/**
+* Perform the sql query and return the results as a list. 
+*/ 
+def query(db,query){
+  rlist = []
+  db.eachRow(query as String){
+    if ((it[0] == null) || (it[0] == 'null')) return(null)
+    rlist << it[0]
+  }
+  return(rlist)
+}
+
+
+
+/*
+Typical database/file will has 186,558 rows by 233 features. 
+Say, 200k x 250 = 50,000 cells.  On disk, takes up 236MB.  
+
+
+*/ 
+
+
+
+/*
+compounds.each{compound->
+
+  // Get background distribution for this compound...
+
+  query = """
+  select pm.Compound,pm.Molarity,data.*
+  from pm,data
+  where pm.Compound = '$compound' 
+  and 
+  pm.WellName = data.WellName;""" as String
+    
+  db.eachRow(query){
+    molarities2Compounds[it.molarity] = it
+  } 
+}
+*/

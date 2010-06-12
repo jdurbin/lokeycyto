@@ -1,0 +1,137 @@
+#!/usr/bin/env groovy 
+/*
+* Join platemap and data files using the h2 database library to create 
+* on-the-fly databases from csv files.  Surprisngly simple and effective. 
+*
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+//dataFile = args[0]
+//platemapFile = args[1]
+
+// Create an h2 jdbc database. 
+// mem says in-memory db, and call it what you like, here db1 
+def db = Sql.newInstance("jdbc:h2:CP2DB","org.h2.Driver")
+
+//query = """
+//select distinct(pm.Compound) from pm where true;"""
+//processQuery(db,query)
+
+
+//query = """
+//select  pm.WellName,pm.Compound from pm where pm.Compound = 'Cycloheximide (NSC-185)';"""
+//processQuery(db,query)
+
+
+query = """
+select  pm.WellName,pm.Compound,pm.Molarity,sum(data.CellNumberofMicronucleiMicronuclei)
+from pm,data 
+where 
+pm.Compound = 'Binuclein'
+and pm.WellName = data.WellName;
+"""
+
+
+query = """
+select data.CellNumberofMicronucleiMicronuclei
+from pm,data 
+where 
+pm.Compound = 'Binuclein'
+and pm.WellName = data.WellName;
+"""
+cells = query(db,query)
+cellvals = cells.collect{
+  if (it != null){
+    return(it.toDouble())
+  }else{
+    return(0.0);
+  }
+}
+
+
+println "Num = "+cellvals.size()
+println "Sum="+cellvals.sum()
+
+
+
+
+/*
+// Write a normal sql query
+query = """
+select pm.Compound,pm.Molarity,data.*
+from pm,data
+where pm.Compound = 'Benomyl' 
+and 
+pm.WellName = data.WellName;"""
+
+processQuery(db,query)
+*/
+
+/*
+query = """
+select pm.Compound,pm.Molarity,data.*
+from pm,data
+where pm.Compound = 'Rapamycin' 
+and 
+pm.WellName = data.WellName;"""
+
+processQuery(db,query)
+*/
+
+
+def processQuery(db,query){
+  bFirstTime = true;
+  db.eachRow(query){result->  
+    meta = result.getMetaData()
+    cols = meta.getColumnCount()
+  
+    if (bFirstTime){
+      headings = (1..cols).collect{meta.getColumnLabel(it)}
+      println headings.join(",")
+      bFirstTime = false
+    }
+  
+    vals = (0..<cols).collect{result[it]}
+    println vals.join(",")  
+  }
+}
+
+
+/**
+* Perform the sql query and return the results as a list. 
+*/ 
+def query(db,query){
+  rlist = []
+  db.eachRow(query){
+    rlist << it[0]
+  }
+  return(rlist)
+}
+
+
+
+/* 
+DB is 893 MB, 495K rows.  
+
+time ./testscripts/dbfileexplore > fileexplore.out
+
+real	2m35.935s
+user	1m50.504s
+sys	0m28.414s
+
+Results were 18,721 rows. 
+
+Hmm... so at 2m/feature, that's 233*2 = 466 minutes = 7.7 hours.  Ugh! 
+
+
+Select data.* takes the same 2m29 sec... 55 minutes for all 22. 
+So maybe that's not bad, I can then do a Page of plots for each compound 
+csv file.  18,721 rows is small enough to do an in-RAM query. 
+
+Try two selects back to back to see if any of the time cost is amoratized: 4m57.436
+
+So no time savings by going two back to back... oh well...
+
+*/
+

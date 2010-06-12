@@ -1,0 +1,263 @@
+#!/usr/bin/env groovy 
+/*
+* 
+*  
+* 
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+import durbin.util.*;
+import durbin.charts.*;
+import javax.swing.*;
+import java.awt.*;
+
+import org.jfree.data.xy.*;
+import org.jfree.ui.*;
+import org.jfree.chart.title.*;
+import org.jfree.chart.axis.*;
+import org.jfree.data.statistics.*;
+
+
+if (args.length < 2){
+  println """
+    xyPlotAllFeatures PerCompoundCSV GifOut
+  
+    For each feature, generates a scatter plot of that feature versus 
+    molarity of treated compound. Presents all of these plots in a grid of 
+    plots on one page.  The PerCompoundCSV file is a file that has been 
+    created by doing a join between the raw data file and a platemap file, 
+    for example by using extactPerCompoundFiles script. 
+
+    EXAMPLE: 
+    xyPlotAllFeatures Benomyl.csv PlateMap2.csv Benomyl.gif
+  
+  """  
+  System.exit(1)
+}
+
+compoundcsv = args[0]
+outFile = args[1]
+
+// Create a 10x10 grid panel to hold all of our charts...
+panel = new JPanel()
+panel.setLayout(new GridLayout(1,300));
+
+// Create an h2 jdbc database. 
+// mem says in-memory db, and call it what you like, here db1 
+def db = Sql.newInstance("jdbc:h2:mem:data","org.h2.Driver")
+System.err.print "Reading data table $compoundcsv..."
+db.execute("create table data as select * from csvread('$compoundcsv')" as String)
+// Make molarity column a double...
+db.execute("alter table data alter column molarity double;")
+System.err.println "done."
+
+// Get all of the feature names from the table...
+query = """
+select column_name from information_schema.columns where table_name = 'DATA';"""
+columnNames = query(db,query)
+
+// Get all of the distinct molarities from the table...
+query = """
+select distinct(molarity) from data where true;"""
+molarities = query(db,query)
+molarities = molarities.sort()
+
+println molarities
+
+// Some columns are not useful for plotting feature values vs molarity...
+skipColumns = ['COMPOUND','MOLARITY','CELLID','INSTANCE','PLATEID',
+'RUNSETTINGSID','SERIESID','SITEID','WELLNAME','WELLX','WELLY'] as Set
+
+// There's no global cell count, so we create our own and plot that...
+molarityPanel = new JPanel()
+molarityPanel.setLayout(new GridLayout(molarities.size(),1))
+molarityValuesList = []
+molarities.each{molarity->  
+  // seriesid picks out the 4 cells...
+  query = """
+  select count(cellid) from data where molarity=$molarity group by seriesid;""" as String
+  values = query(db,query)*.toDouble()  
+  molarityValuesList.add(values)
+}
+maxValue = getMaxValue(molarityValuesList)
+molarityValuesList.eachWithIndex{values,i->
+  title = "Number of cells. (${molarities[i]})"
+  plot = createHistogramFromValues(values,maxValue,title)
+  if (plot != null) molarityPanel.add(plot)
+}
+panel.add(molarityPanel)
+
+
+// for each feature create a panel of histograms, one for each molarity
+// Do a little extra work to ensure that the domain of the histograms are 
+// comparable for each feature.
+featureCount = 0;
+columnNames.each{cName->
+  featureCount++
+    
+  molarityPanel = new JPanel()
+  molarityPanel.setLayout(new GridLayout(molarities.size(),1))    
+  
+  // Skip non feature columns...
+  if (skipColumns.contains(cName)) return;
+      
+  molarityValuesList = []
+  molarities.each{molarity->
+    query = """
+    select $cName from data where molarity=$molarity;""" as String    
+    values = query(db,query)
+    if (values != null){    
+      values = values*.toDouble()
+      molarityValuesList.add(values)
+    }
+  }
+  
+  maxValue = getMaxValue(molarityValuesList)
+  molarityValuesList.eachWithIndex{values,i->
+    plot = createHistogramFromValues(values,maxValue,"$cName (${molarities[i]})")
+    if (plot != null) molarityPanel.add(plot)
+  }  
+  panel.add(molarityPanel)    
+}
+println "$featureCount features plotted."
+
+// Save result to a file...
+print "Rendering plots to $outFile..."
+ImageUtils.savePanelAsGIF(panel,outFile)
+println "done."
+
+println "Well?"
+System.exit(1)
+
+/*****************************************************************/
+/************************* Methods *******************************/
+/*****************************************************************/
+
+/**
+* 
+*/
+def getMaxValue(valuesList){
+  def max = -1
+  valuesList.each{values->
+    maxval = values.max()
+    if (maxval > max) max = maxval
+  }
+  return(max)
+}
+
+/**
+* Perform a query returning x,y values pairs and create a plot
+* based on this query. 
+*/ 
+def createHistogramFromValues(values,binmax,cName){
+       
+  if (values != null){
+    println "Plotting $cName. Num values: "+values.size()
+    
+    series = new HistogramDataset()
+    valarray = new double[values.size()]
+    values.eachWithIndex{v,i->valarray[i] = v as double}
+    
+    series.addSeries("Series1",valarray,20,0,binmax as int)
+    chartTitle = "$cName"
+    chartpanel = BasicCharts.histogram(chartTitle,"Value","Count",series,250,166) 
+    // Make font smaller than default...    
+    titleFont = new java.awt.Font("SansSerif", java.awt.Font.BOLD,9)
+    title = new org.jfree.chart.title.TextTitle(chartTitle,titleFont)
+    chart = chartpanel.getChart()
+    chart.setTitle(title);
+    
+    //return(chartpanel)
+    
+    // OK, see if it improves performance to precompute each image and discard
+    // the chart... Answer:  definitely. 
+    image = ImageUtils.getPanelImage(chartpanel)
+    label = new JLabel(new ImageIcon(image))    
+    return(label)
+        
+  }else{
+    println "Skipping $cName (has NULL values).  Num values: "+xyvalues.getItemCount()
+    return(null)
+  }
+}
+
+
+/**
+* Perform a query returning x,y values pairs and create a plot
+* based on this query. 
+*/ 
+def createHistogramFromQuery(db,query,cName){
+  values = queryXYPair(db,query) 
+       
+  if (values != null){
+    println "Plotting $cName. Num values: "+values.length
+    
+    series = new HistogramDataset()
+    series.addSeries("Series1",values,20,0,300)
+    chartTitle = "$cName"
+    chartpanel = BasicCharts.histogram(chartTitle,"Value","Count",series,250,166) 
+    // Make font smaller than default...    
+    titleFont = new java.awt.Font("SansSerif", java.awt.Font.BOLD,9)
+    title = new org.jfree.chart.title.TextTitle(chartTitle,titleFont)
+    chartpanel.getChart().setTitle(title);
+    return(chartpanel)
+  }else{
+    println "Skipping $cName (has NULL values).  Num values: "+xyvalues.getItemCount()
+    return(null)
+  }
+}
+
+
+/**
+* Perform the sql query and return the results as a list. 
+*/ 
+def queryXYPair(db,query){
+  //xyValues = new XYSeries("Series1")
+  values = []
+  db.eachRow(query){result->
+    meta = result.getMetaData()
+    cols = meta.getColumnCount()
+    vals = (0..<cols).collect{result[it]}
+    if ((vals[0] == 'null') || (vals[1] == 'null')) return(null);    
+//    xyValues.add(vals[0] as double,vals[1] as double)
+    values.add(vals[1] as double);
+//    rlist << vals
+  }
+  return(values.toArray() as double[])
+}
+
+
+/**
+* Perform the sql query and return the results as a list. 
+*/ 
+def query(db,query){
+  rlist = []
+  db.eachRow(query){
+    if ((it[0] == null) || (it[0] == 'null')) return(null)
+    rlist << it[0]
+  }
+  return(rlist)
+}
+
+/*
+Took about 24 minute to generate all plots for one compound. 
+*/
+
+/*
+Precomputed image test...
+
+With panels:
+40 feature limit:  real	0m57.497s
+60 feature limit:  real	1m47.750s
+80 feature limit:  real 3m10.871s
+100 feature limit: real 4m30.649s
+
+With precomputed images:
+40 feature limit:  real 0m27s. 
+60 feature limit:  real 0m41.947s
+80 feature limit:  real 0m56.906s
+100 real                1m12.126s
+all features:           11m55.788s
+
+*/

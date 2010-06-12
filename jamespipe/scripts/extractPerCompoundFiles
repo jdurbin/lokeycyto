@@ -1,0 +1,78 @@
+#!/usr/bin/env groovy 
+/*
+* Join platemap and data files using the h2 database library to create 
+* on-the-fly databases from csv files.  Surprisngly simple and effective. 
+*
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+database = args[0]
+dir = args[1]
+
+// connect to the file-based database specified...
+def db = Sql.newInstance("jdbc:h2:$database","org.h2.Driver")
+
+query = """
+select distinct(pm.Compound) from pm where true;"""
+compounds = query(db,query)
+
+compounds.each{compound->
+  query = """
+  select pm.Compound,pm.Molarity,data.*
+  from pm,data
+  where pm.Compound = '$compound' 
+  and 
+  pm.WellName = data.WellName;""" as String
+    
+  fileOutName = "$dir/"+compound.replaceAll(/\W/,"")+".csv"
+  queryToCSV(db,query,fileOutName)
+}
+
+
+/**
+* Perform the sql query and return the results as a list. 
+*/ 
+def query(db,query){
+  rlist = []
+  db.eachRow(query){
+    rlist << it[0]
+  }
+  return(rlist)
+}
+
+/**
+* Perform the query and save the results as a CSV file to the 
+* specified file. 
+*/ 
+def queryToCSV(db,query,fileOutName){
+  new File(fileOutName).withWriter{w->  
+    bFirstTime = true;
+    db.eachRow(query){result->  
+      meta = result.getMetaData()
+      cols = meta.getColumnCount()
+  
+      if (bFirstTime){
+        headings = (1..cols).collect{meta.getColumnLabel(it)}
+        w.writeLine headings.join(",")
+        bFirstTime = false
+      }
+  
+      vals = (0..<cols).collect{result[it]}
+      w.writeLine vals.join(",")  
+    }
+  }
+}
+
+/*
+Took 61m to extract all 22 by-compound files.
+
+With merged files...
+time ./scripts/extractPerCompoundFiles CP2DB percompound 
+
+real	40m41.539s
+user	30m42.051s
+sys	7m11.179s
+
+ 
+*/

@@ -1,0 +1,42 @@
+#!/usr/bin/env groovy 
+
+dataFile = args[0]
+
+/**
+* The data file headings are chock full of special characters.  Clean these 
+* up and spit out a csv file equivalent with clean column headings. 
+*
+*/
+
+new File(dataFile).withReader{r->
+
+  def headings = r.readLine().split("\t")
+  headings = headings*.replaceAll("%","Pct") // Rename % signs to Pct. 
+  headings = headings*.replaceAll(/\W/, "") // Remove all non text characters.
+  
+  println headings.join(",")
+  
+  r.eachLine{line->
+    println line.replaceAll(/\t/,",") 
+  } 
+}
+
+/* 
+Takes about 1 minute for the 495k line file  */
+
+
+/* 
+replacing special characters piecemeal...
+//  headings = headings*.replaceAll("\"","") // Remove quotes
+//  headings = headings*.replaceAll(/\s/,"") // Remove spaces
+//  headings = headings*.replaceAll(/\(/,"") // Remove left braces
+//  headings = headings*.replaceAll(/\)/,"") // Remove right braces
+
+//  headings = headings*.replaceAll("-","") // Remove dashes
+//  headings = headings*.replaceAll("\/","") // Remove forward slashes
+//  headings = headings*.replaceAll("\\","") // Remove backslash
+//  headings = headings*.replaceAll(":","") // Remove colons 
+//  headings = headings*.replaceAll("-","") // Remove dash 
+//  headings = headings*.replaceAll(".","") // Remove dots 
+//  headings = headings*.replaceAll(/\+","Plus") // Remove dots 
+*/

@@ -1,0 +1,415 @@
+#!/usr/bin/env groovy 
+
+// COLT efficient stat classes.  http://acs.lbl.gov/software/colt/
+import  hep.aida.bin.StaticBin1D
+import  hep.aida.ref.Histogram1D
+
+// All found in durbinlib.jar.  Colt is bundled there too. 
+import  durbin.util.*
+import  durbin.cyto.Utils 
+import  durbin.cyto.DataUtils 
+import  durbin.stat.KolmogorovSmirnov as KS
+
+// Some plotting libraries to make plots of all of the distributions...
+import durbin.charts.*;
+
+import javax.swing.*;
+import java.awt.*;
+
+import org.jfree.data.xy.*;
+import org.jfree.ui.*;
+import org.jfree.chart.title.*;
+import org.jfree.chart.axis.*;
+import org.jfree.data.statistics.*;
+
+
+err= System.err
+
+/***
+*  Reads in a merged data file and a platemap file and produces a 
+*  file of features by compound+molarity values, like
+* 
+*      C1M1 C1M2 C1M3 C2M1 C2M2 C2M3....
+* F1
+* F2 
+* F3 
+* F4
+* F5
+* 
+* Where F1,F2, etc. are things like BinucleatedCellsMicronuclei, compounds
+* are things like Benomyl, and molarity are molarity values like 1, 10, 0.1.   
+* 
+* Each feature,compound+molarity will be a statistic that compares the distributions
+* of values for compound+molarity for that feature with the control distribution. 
+* One such statistic is the Kolmogorov-Smirnov statistic. 
+* 
+*/
+
+// Some columns are not actual features, so these will be skipped in the analysis...
+skipColumns = ['OrientationIMASummary','CellID','Instance','PlateID',
+ 'RunSettingsID','SeriesID','SiteID','WellName','WellX','WellY',
+ 'CellVesicleCountTransfluor','CellVesicleAverageIntensityTransfluor',
+ 'CellVesicleIntegratedIntensityTransfluor','CellVesicleTotalAreaTransfluor'] as Set
+
+datafile = args[0]
+plateMapFile = args[1]
+numBins = args[2] as int
+measureType = args[3] 
+
+// Read the platemap file and convert it to maps mapping WellName to 
+// compound name and WellName to molarity.   Control wells will be 
+// named "Blank" and will have empty strings for molarity values. 
+(well2compound,well2molarity) = readPlateMapFile(plateMapFile)
+
+// Scan file once to obtain the max and min values for each feature
+// StaticBin1D will, without using much memory, allow you to compute 
+// basic statistics on each feature. (Scan takes ~1m4s for 186k lines)
+// Java version takes 20s, so it's 3x as fast. 
+err.println "Scanning $datafile to find feature max and mins..."
+//featureBins = computeFeatureBins(datafile)
+
+// Java implementation for speed.  
+featureBins = DataUtils.computeFeatureBins(datafile,skipColumns)
+err.println "Done preprocessing $datafile"
+
+// Go through the file a second time, this time creating histograms 
+// of each feature vs compound+molarity...
+lineCount = 0
+def headings
+def headings2ColMap
+def CpMSet = new HashSet()
+new File(datafile).withReader{r->
+  headings = r.readLine().split(",")
+  headings2ColMap = makeColMap(headings)
+  wellCol = headings2ColMap['WellName']   // column that contains WellName
+
+  //CpMByFeature = new MultidimensionalMap()
+  CpMByFeature = [:]
+  r.splitEachLine(","){fields->
+    
+    lineCount++
+    if (!(lineCount % 10000)) err.println "Processing line $lineCount"
+    
+    // Wells are surrounded in quotes in file, remove them...
+    well = fields[wellCol].replaceAll(/\"/,"") // "
+    compound = well2compound[well]
+    molarity = well2molarity[well]
+    if (molarity == "") molarity = "0"
+    CpM = "${compound}_${molarity}"          // A key for compound + molarity
+    CpMSet.add(CpM)
+    //println "Well: $well\t CpM: $CpM"    
+
+    fields.eachWithIndex{featureValue,i->
+      
+      if (featureValue == "") return;
+      
+      featureName = headings[i]
+      if (skipColumns.contains(headings[i])) return;
+
+      CpMFeature = "$CpM$featureName" as String
+
+      //if (CpMByFeature.contains(CpM,featureName)){        
+      if (CpMByFeature.containsKey(CpMFeature)){        
+        bin = CpMByFeature[CpMFeature]
+        //err.println "MULTI FILL $featureName $CpM"
+        bin.fill(featureValue as Double)
+      }else{        
+        
+        //err.println "FIRST FILL $featureName $CpM"
+        
+        //println "featureName:$featureName featureValue: $featureValue  featureBin:${featureBins[featureName]}"
+        def featureMin = featureBins[featureName].min()  // Get max and min from preprocessing
+        def featureMax = featureBins[featureName].max()         
+                
+        //err.println "$featureName $CpM min: $featureMin max: $featureMax"
+        hist = new Histogram1D("$featureName $CpM",numBins,featureMin,featureMax)
+        hist.fill(featureValue as Double)
+        CpMByFeature[CpMFeature] = hist
+      }      
+//      err.println "$featureName $CpM fill($featureValue)"      
+    }
+  }
+}
+
+err.println CpMByFeature.size()
+
+
+//============== Write out table ==================
+
+// So now we have an array of CbTByFeature(s) with each element being a 1D bin.... 
+
+// the control compound has a special ID...
+controlCompound = 'Blank_0'
+
+// Write heading
+//headings = CpMByFeature.keySet()   // aka CpMs
+println "Features,${CpMSet.join(',')}"
+
+// Write out the rest of the table...
+features = featureBins.keySet()
+features.each{feature->
+  print "$feature,"
+
+  CpMFeature = "$controlCompound$feature" as String
+
+  // The blank/control distribution doesn't vary with molarity or compound (CpM), 
+  // so only need to compute it's smoothed histogram once per feature...
+  blankHist = CpMByFeature[CpMFeature]
+  bx = (0..<numBins).collect{blankHist.binHeight(it)}  as double[]    
+  //bx = normalize(bx)
+  bxsmooth = exponentialSmoothing(bx,0.25)
+
+  err.println "$feature Blank_0 $bx"
+
+  values = CpMSet.collect{CpM->
+        
+    // Get the smoothed histogram for this feature at this compound and molarity. 
+    CpMFeature = "$CpM$feature" as String
+    experimentalHist = CpMByFeature[CpMFeature]
+    
+    if (experimentalHist == null){
+      err.println "ERROR: Null distribution at $CpMFeature"
+      return;
+    }
+        
+    //err.println "HIST: $feature $CpM"
+    //(0..numBins).each{err.println "\t${experimentalHist.binEntries(it)}\t${experimentalHist.binHeight(it)}"}
+    
+    err.println "histDiff: $CpMFeature"
+    
+    ex = (0..<numBins).collect{experimentalHist.binHeight(it)}  as double[] 
+    err.println "$CpMFeature\t$ex"
+    //ex = normalize(ex) 
+    exsmooth = exponentialSmoothing(ex,0.25)
+    
+    //err.println "$feature $CpM $ex"
+    err.println "$CpMFeature\t$bxsmooth"
+    err.println "$CpMFeature\t$exsmooth"
+    
+    // Pick the measure of the difference between experimental and control distributions
+    // to use...
+    def measure
+    switch(measureType){
+
+      case 'meandiff':
+        measure = meandiff(exsmooth,bxsmooth); break;
+
+      case 'ksdist':
+        measure = KS.signedDistance(exsmooth,bxsmooth); break;
+
+      case 'ksprob':
+        // Compute Kolmogorov Smirnov statistic for control vs experiment 
+        exprob = normalize(exsmooth)
+        bxprob = normalize(bxsmooth)     
+        measure = KS.test(exprob,bxprob); break;
+
+      case 'ksscaled':
+        // Divide by the standard deviation of the control values
+        //ksdist = KS.signedDistance(values,controlValues)
+        //measure = ksdist/controlValuesStdDev; break;
+
+      case 'histdiff':
+        measure = histDiff(exsmooth,bxsmooth); break;
+    }        
+    return(measure)  // Could be doing K-S or other stat here. 
+  } 
+  println "${values.join(',')}"  
+}
+
+
+/*
+ def measure
+  switch(measureType){
+    case 'meandiff':
+      measure = meandiff(values,controlValues); break;
+    case 'ksdist':
+      measure = KS.signedDistance(values,controlValues); break;
+    case 'ksprob':
+      // Compute Kolmogorov Smirnov statistic for control vs experiment      
+      measure = KS.test(values,controlValues); break;
+    case 'ksscaled':
+      // Divide by the standard deviation of the control values
+      ksdist = KS.signedDistance(values,controlValues)
+      measure = ksdist/controlValuesStdDev; break;
+  }
+*/
+
+
+/******************************************************************/
+/*************************  Methods *******************************/
+/******************************************************************/
+
+
+/**
+* Returns the difference in the means of the two lists. 
+*/ 
+def meandiff(v1,v2){
+  s1 = 0;c1=0;
+  v1.each{
+    s1+=it
+    c1++
+  }
+  m1 = s1/c1;
+  
+  s2 = 0;c2=0;
+   v2.each{
+     s2+=it
+     c2++
+   }
+   m2 = s2/c2;
+  diff = m1-m2; 
+  // Want to normalize it, so that the values are somewhat comparable..
+  rval = 0.000000001; // Just to prevent ugly divide by zero. 
+  if (m2 != 0) rval = diff/m2
+  return(rval);  
+}
+
+
+
+/**
+* Hist diff...
+* 
+* Smooth the histogram with some kind of exponential weighting
+* For each point in histogram.  
+*
+* Assume blankHist has already been smoothed? 
+*
+*/ 
+def histDiff(exsmooth,bxsmooth){  
+  debuglist = []
+  
+  double sum = 0;
+  (0..<bxsmooth.length).each{i->
+    diff = bxsmooth[i] - exsmooth[i]    
+    debuglist << diff
+    sum += diff
+  }  
+  err.println "\t diffsum: $sum diff: $debuglist"
+    
+  return(sum)
+}
+
+
+/**
+* Scales bins to 0-1 scale. 
+*
+*/ 
+def normalize(double[] bins){
+  sum = 0
+  bins.each{sum+=it}
+  normbins = bins.collect{it/sum} as double[]
+  return(normbins)  
+}
+
+
+/**
+* Performs 'exponential smoothing' on the given array. 
+* 
+* x0,x1,x2,x3,x4 input. 
+*
+*   s0 = x0 + alpha*(x1-x0)
+*   s1 = alpha*(x0-x1) + x1 + alpha*(x2-x1)
+* 
+*/
+def exponentialSmoothing(x,alpha){
+  def n = x.length
+  double[] s = new double[n]
+  s[0] = x[0] + alpha*(x[1]-x[0])  
+  (1..< (n-1)).each{i->
+    s[i] = alpha*(x[i-1]-x[i])+x[i]+alpha*(x[i+1]-x[i])
+  }
+  s[n-1] = alpha*(x[n-2]-x[n-1])+x[n-1]
+     
+  return(s)
+}
+
+
+/**
+* Read the platemap file in as a pair of maps, one from WellName to compound
+* the other from WellName to molarity.  I look up the columns of the 
+* WellName,Compound, and Molarity to make the code dependent only on the heading
+* names and not on the actual heading orders. 
+*/ 
+def readPlateMapFile(plateMapFile){
+  
+  def well2compound = [:]
+  def well2molarity = [:]
+  
+  new File(plateMapFile).withReader{r->
+    headings = r.readLine().split(",")
+    headings2ColMap = makeColMap(headings)
+    wellIdx = headings2ColMap['WellName']
+    compoundIdx = headings2ColMap['Compound']
+    molarityIdx = headings2ColMap['Molarity']
+        
+    r.splitEachLine(","){fields->
+      well = fields[wellIdx]
+      compound = fields[compoundIdx]
+      molarity = fields[molarityIdx]
+      
+      //println "well2compound[$well] = $compound"
+      //println "well2compound[$well] = $molarity"
+      
+      well2compound[well] = compound
+      well2molarity[well] = molarity
+    }    
+  }  
+  return([well2compound,well2molarity])  
+}
+
+
+
+/**
+* 
+*/ 
+def makeColMap(headings){
+  def map = [:]
+  headings.eachWithIndex{name,i->map[name]=i}
+  return(map)
+}
+
+
+
+/********************** DEPRECATED *****************************/
+
+/***
+* [Deprecated.. Translated to faster java version in durbinlib.jar]
+* Scan through file, creating a StaticBin1D for each 
+* feature.  Various simple statistics, such as max, min, mean, 
+* and so on can be extracted from a StaticBin1D, which only saves
+* summary values and so doesn't take much space. 
+*/ 
+def computeFeatureBins(datafile){
+  def headings;
+  lineCount = 0
+  featureBins = [:]
+  new File(datafile).withReader{r->
+    headings = r.readLine().split(",")
+    r.splitEachLine(","){fields->
+    
+      lineCount++
+      if (!(lineCount % 10000)) println "Preprocessing line $lineCount"
+    
+      fields.eachWithIndex{featureValue,i->
+      
+        if (skipColumns.contains(headings[i])) return;
+      
+        if (featureValue == "") return;
+        if (!featureValue.isDouble()){
+          println "$i ${headings[i]}=[$featureValue]"
+          return
+        }
+              
+        featureName = headings[i]   
+        if (featureBins.keySet().contains(featureName)){
+          featureBins[featureName].add(featureValue as Double)
+        }else{
+          println "Adding Bin for $featureName"
+          featureBins[featureName] = new StaticBin1D();
+          featureBins[featureName].add(featureValue as Double)
+        }
+      }
+    }
+  }
+  return(featureBins)
+}

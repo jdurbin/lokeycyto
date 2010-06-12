@@ -1,0 +1,35 @@
+#!/usr/bin/env groovy 
+
+
+import hep.aida.ref.Histogram1D;
+
+
+h = new Histogram1D("Test",20,0,500)
+
+h.fill(1)
+h.fill(1)
+h.fill(1)
+h.fill(1)
+h.fill(4)
+h.fill(4)
+h.fill(4)
+h.fill(24)
+h.fill(23)
+h.fill(26)
+h.fill(126)
+h.fill(136)
+h.fill(200)
+h.fill(300)
+h.fill(310)
+h.fill(315)
+h.fill(495)
+h.fill(500)
+
+(0..20).each{i->
+  println "$i\t"+h.binEntries(i)+"\t"+h.binHeight(i)
+}
+
+
+ex = (0..20).collect{h.binHeight(it)}  as double[]    
+
+println ex

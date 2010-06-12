@@ -1,0 +1,43 @@
+#!/usr/bin/env groovy 
+/*
+* Join platemap and data files using the h2 database library to create 
+* on-the-fly databases from csv files.  Surprisngly simple and effective. 
+*
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+dataFile = args[0]
+platemapFile = args[1]
+
+// Create an h2 jdbc database. 
+// mem says in-memory db, and call it what you like, here db1 
+def db = Sql.newInstance("jdbc:h2:mem:data","org.h2.Driver")
+
+// Create the first table...  
+// Note, you could specify all the column names and types, but it infers something
+// reasonable and that's oten sufficient.  Also, the as String converts from GString
+// which will complain about the single quotes otherwise. 
+db.execute("create table data as select * from csvread('$dataFile')" as String)
+db.execute("create table pm as select * from csvread('$platemapFile')" as String)
+
+// Write a normal sql query
+query = """
+select data.SeriesID,pm.WellName,pm.Compound,pm.Molarity 
+from pm,data 
+where pm.Compound='Benomyl' and pm.WellName=data.WellName;"""
+
+bFirstTime = true;
+db.eachRow(query){result->  
+  meta = result.getMetaData()
+  cols = meta.getColumnCount()
+  
+  if (bFirstTime){
+    headings = (1..cols).collect{meta.getColumnLabel(it)}
+    println headings.join(",")
+    bFirstTime = false
+  }
+  
+  vals = (0..<cols).collect{result[it]}
+  println vals.join(",")  
+}

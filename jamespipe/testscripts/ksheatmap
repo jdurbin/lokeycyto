@@ -1,0 +1,110 @@
+#!/usr/bin/env Rscript
+
+# Script uses R to produce a nice heatmap of the given data file. 
+
+# The command line arguments are crude because this is intended to be 
+# called from Groovy or Python or some other language more than as a 
+# stand alone.  
+
+library("gplots")   # to get heatmap.2
+library("ctc")      # cluster and tree conversion... to save cdt files, etc.
+
+#args = commandArgs(trailingOnly = TRUE)
+#fileName = args[1]
+#title = args[2]
+#outFile = args[3]
+#outFileThumb = args[4]
+#clusterOut = args[5]
+
+fileName = "/Users/kdurbin/ucsc/cytological/Data/Control/newpiperesults/bob.csv"
+#title = "LY294002 Titration/Control Kolmogorov-Smirnov Pr"
+outFile = paste("bob/heat",".pdf",sep="")
+outFileThumb = paste("bob/heat",".tn.png",sep="") 
+clusterOut = "cluster.cdt"
+
+outFile
+outFileThumb
+
+ks = read.csv(fileName, sep=",")
+ks_matrix = data.matrix(ks)
+nr = nrow(ks_matrix)
+
+ks_matrix = ks_matrix[,2:9]
+
+#hist(ks_matrix,main=title)
+
+# Change the main font scaling to be 75% of normal.  
+par(cex.main=0.75)
+#png(outFileThumb)
+#margins=c(5, 4, 4, 2),
+heatmap.2(ks_matrix, 
+          Colv=FALSE,
+          dendrogram = c("row"),
+          col=topo.colors(256), 
+          scale="none",
+          key=FALSE, 
+          symkey=FALSE, 
+          density.info="none", 
+          trace="none", 
+          cexRow=0.2+0.1/log10(nr)
+          )
+dev.off()
+
+
+pdf(outFile)
+par(cex.main=0.7)
+heatmap.2(ks_matrix, 
+          col=topo.colors(256), 
+          labRow = ks$FEATURE,
+          scale="none",
+          key=TRUE, keysize=1.2,
+          symkey=FALSE, 
+          density.info="none", 
+          trace="none",
+          Colv=FALSE,
+          dendrogram = c("row"),
+          main=title,
+          cexRow=0.2+0.1/log10(nr)
+          )
+#dev.off()  # close the open graphics device.
+
+row.names(ks_matrix) = ks$FEATURE
+
+# Now save files needed to browse with a cluster viewer...
+hclust2treeview(ks_matrix,
+                file=clusterOut,method = "euclidean",
+                link = "complete",keep.hclust=FALSE)
+
+
+
+#-------------------------------------------------------------------
+# Scraps... bits and pieces...
+
+#nba
+#ks = nba[order(nba$PTS),]
+
+#row.names(nba) = nba$Name
+#nba = nba[,2:20]
+
+#ks_heatmap = heatmap(ks_matrix, Rowv=NA, Colv=NA, 
+#col = heat.colors(256),
+#col=redgreen(75)
+#ks_heatmap = heatmap(ks_matrix,Colv=NA, 
+#                     col=redgreen(75),
+#                     scale="row", margins=c(5,10),
+#                     labRow = ks$FEATURE,
+#                     xlab ="Titration",
+#                     ylab ="Features",
+#                     cexRow = 0.2 + 0.1/log10(nr),
+#                     main=title
+#                     )
+
+
+#col = heat.colors(256), 
+
+# ?cm.colors for list of colors
+
+# Hot colors
+# nba_heatmap = heatmap(nba_matrix, Rowv=NA, Colv=NA,
+# col = heat.colors(256), scale="column", margins=c(5,10))
+#                      col = cm.colors(256),

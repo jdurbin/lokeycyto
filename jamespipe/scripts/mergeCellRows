@@ -1,0 +1,65 @@
+#!/usr/bin/env groovy 
+
+import com.google.common.collect.*;
+
+err = System.err
+
+/**
+* For some strange reason, the data file splits up cell specific information
+* across several rows.  This program simply combines all information for a given
+* Cell ID into a single row. 
+*
+*/ 
+dataFile = args[0]
+
+cellID2Row = [:]
+heading2IdxMap = [:]
+
+new File(dataFile).withReader{r->
+  
+  headings = r.readLine().split(",")
+  headings.eachWithIndex{h,i->heading2IdxMap[h] = i}
+  cellIDIdx = heading2IdxMap['CellID']
+  
+  println headings.join(",")
+  
+  r.splitEachLine(","){fields->
+    cellID = fields[cellIDIdx]
+    
+    if (!cellID2Row.containsKey(cellID)){
+      // If the row doesn't exist, add it...
+      cellID2Row[cellID] = fields
+    }else{
+      // Otherwise, update the non-null columns of the pre-existng row..
+      row = cellID2Row[cellID]
+      fields.eachWithIndex{field,i->
+        // Sanity test...
+        if (field != ""){
+          if ((row[i] != "") && (row[i] != field)){
+            err.println "ERROR: row[$i]=${row[i]} and $field both non null"
+          }else{
+            row[i] = field
+          }
+        }                
+      }
+    } // else existing row
+  } // each line of file    
+}
+
+cellID2Row.each{key,rowValue->
+  println rowValue.join(",")  
+}
+
+
+/*
+
+time ./testscripts/mergeCellRows CP2.allLines.csv > CP2.allLines.merged.csv 
+
+real	9m31.461s
+user	4m10.298s
+sys	0m29.797s
+
+Not to bad, but this in-RAM version was topping out at around 3GB.  
+input file couldn't be much larger. 
+
+*/ 

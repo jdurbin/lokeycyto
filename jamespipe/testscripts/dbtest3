@@ -1,0 +1,16 @@
+#!/usr/bin/env groovy 
+/*
+* Join platemap and data files using the h2 database library to create 
+* on-the-fly databases from csv files.  Surprisngly simple and effective. 
+*
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+database = "CP2DB"
+
+
+// connect to the file-based database specified...
+def db = Sql.newInstance("jdbc:h2:$database","org.h2.Driver")
+
+

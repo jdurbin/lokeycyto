@@ -1,0 +1,11 @@
+
+
+
+each line{
+	if (new cell){
+		write out merged line
+		start new cell
+	}else{
+		merge with existing cell
+	}
+}

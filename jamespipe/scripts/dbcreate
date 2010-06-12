@@ -1,0 +1,61 @@
+#!/usr/bin/env groovy 
+/*
+* Join platemap and data files using the h2 database library to create 
+* on-the-fly databases from csv files.  Surprisngly simple and effective. 
+*
+*/
+import groovy.sql.Sql
+import org.h2.Driver
+
+dataFile = args[0]
+platemapFile = args[1]
+dbName = args[2]
+
+// Create an h2 jdbc database. 
+def db = Sql.newInstance("jdbc:h2:$dbName","org.h2.Driver")
+
+// Create the first table...  
+// Note, you could specify all the column names and types, but it infers 
+// something reasonable and that's oten sufficient.  Also, the as String 
+// converts from GString which will complain about the single quotes otherwise. 
+System.err.print "Reading data table..."
+db.execute("create table data as select * from csvread('$dataFile')" as String)
+System.err.println "done."
+
+System.err.print "Reading platemap file..."
+db.execute("create table pm as select * from csvread('$platemapFile')" as String)
+System.err.println "done."
+
+
+/*
+time ./testscripts/dbcreate CP2.allLines.csv PlateMap2.csv 
+Reading data table...done.
+Reading platemap file...done.
+
+real	4m20.420s
+user	1m11.256s
+sys	0m16.693s
+
+Original file:
+
+236	CP2.allLines.csv
+
+Database: 
+
+893	CP2DB.h2.db
+
+==========================
+Merged DB:
+
+>time ./scripts/dbcreate CP2.allLines.merged.csv PlateMap2.csv  CP2DB 
+Reading data table...done.
+Reading platemap file...done.
+
+real	1m36.191s
+user	0m40.755s
+sys	0m9.476s
+
+508 MB
+
+
+*/
