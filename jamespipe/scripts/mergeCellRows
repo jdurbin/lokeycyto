@@ -8,6 +8,10 @@ err = System.err
 * For some strange reason, the data file splits up cell specific information
 * across several rows.  This program simply combines all information for a given
 * Cell ID into a single row. 
+* 
+* This is an in-RAM merge that doesn't require the input rows to be sorted
+* by CellID.  It will run out of RAM with large files, however.  For large files
+* use mergeSortedCellRows.  
 *
 */ 
 dataFile = args[0]

@@ -1,6 +1,6 @@
 #!/usr/bin/env groovy 
 /*
-* 
+*  An early database version of computing kolmogrov smirnov stats. 
 */
 import groovy.sql.Sql
 import org.h2.Driver

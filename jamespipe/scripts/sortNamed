@@ -1,0 +1,65 @@
+#!/usr/bin/env groovy 
+
+
+/***
+* Sorts a file given a named heading (e.g. so you don't have to count up 
+* the column number you want to sort on manually)  
+* 
+* Usage:  sortNamed myfile.csv myheading
+* 
+* output goes to stdout. 
+*/ 
+
+
+fin = args[0]     // File
+target = args[1]  // Column name we want to sort on (e.g. CellID)
+
+
+def heading
+new File(fin).withReader{r->
+    heading = r.readLine()
+    fields = heading.split(",")
+    targetIdx = -1
+    fields.eachWithIndex{f,i->
+      if (f.contains(target)) targetIdx = i
+    }
+    
+    if (targetIdx >= 0){
+      targetIdx++ // Make 1 based.
+      System.err.println "targetIdx: $targetIdx"
+      // Writ out heading, since won't be passing it to sort...
+      println heading
+      
+      // Skip first line.  tail +2 works on some machines, not others. 
+      //proc1 = "tail +2 $fin".execute()
+      proc1 = "sed 1d $fin".execute()         
+      
+      // pipe to sort...
+      proc2 = "sort -t , -k $targetIdx".execute() 
+      proc1 | proc2
+      proc2.in.eachLine{
+        println it
+      }
+    }else{
+      System.err.println "ERROR: Couldn't find '$target' in heading."
+    }    
+}
+
+
+
+
+/**
+time ./scripts/sortNamed IXM399.lf.csv CellID > foo.sort.csv 
+
+real	3m12.642s
+user	2m59.382s
+sys	0m20.206s
+
+
+sortNamed IXM490.lf.csv CellID > foo.sort.csv 
+real  22m9.799s
+
+time tail +2 IXM490.lf.csv | sort -t ',' -k 42 -S 3G > foo.sort 
+real	19m48.973s
+
+*/ 

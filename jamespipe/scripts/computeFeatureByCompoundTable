@@ -1,0 +1,186 @@
+#!/usr/bin/env groovy 
+
+// COLT efficient stat classes.  http://acs.lbl.gov/software/colt/
+import  hep.aida.bin.StaticBin1D
+import  hep.aida.ref.Histogram1D
+
+// All found in durbinlib.jar.  Colt is bundled there too. 
+import  durbin.util.*
+import  durbin.cyto.Utils 
+
+// Translations of bits of Groovy code to Java for speed.
+import  durbin.cyto.DataUtils 
+import  durbin.stat.KolmogorovSmirnov as KS
+
+err= System.err  // sugar. 
+
+// PlateMap special column names
+WellHeadingCol = "Well"
+CompoundHeadingCol = "MoleculeID"
+ConcentrationHeadingCol = "Concentration"
+
+// Special column names in data file...
+// Note that DataWellHeadingCol maps to WellHeadingCol
+DataWellHeadingCol = "WellName"  
+
+/***
+*  Reads in a merged data file and a platemap file and produces a 
+*  file of features by compound+molarity values, like
+* 
+*      C1M1 C1M2 C1M3 C2M1 C2M2 C2M3....
+* F1
+* F2 
+* F3 
+* F4
+* F5
+* 
+* Where F1,F2, etc. are things like BinucleatedCellsMicronuclei, compounds
+* are things like Benomyl, and molarity are molarity values like 1, 10, 0.1.   
+* 
+* Each feature,compound+molarity will be a statistic that compares the distributions
+* of values for compound+molarity for that feature with the control distribution. 
+* One such statistic is the Kolmogorov-Smirnov statistic. 
+* 
+*/
+
+// Some columns are not actual features, so these will be skipped in the analysis...
+skipColumns = ['OrientationIMASummary','CellID','Instance','PlateID',
+ 'RunSettingsID','SeriesID','SiteID','WellName','WellX','WellY',
+ 
+ // These sort of look like actual features, but they tend to be uninformative, or
+ // all zero, for one reason or another. 
+ 'CellVesicleCountTransfluor','CellVesicleAverageIntensityTransfluor',
+ 'CellVesicleIntegratedIntensityTransfluor','CellVesicleTotalAreaTransfluor',
+ 'CellScoringProfileMultiWaveScoring',
+ 'LaserfocusscoreMultiWaveScoring', 
+ 'LaserfocusscoreTransfluor', 
+ 'LaserfocusscoreMicronuclei',
+ 'CentroidYIMASummary', 
+ 'CentroidXIMASummary'
+ ] as Set
+
+datafile = args[0]
+plateMapFile = args[1]
+numBins = args[2] as int
+measureType = args[3] 
+
+// Create a 10x10 grid panel to hold all of our charts...
+
+// Read the platemap file and convert it to maps mapping WellName to 
+// compound name and WellName to molarity.   Control wells will be 
+// named "Blank" and will have empty strings for molarity values. 
+(well2compound,well2molarity) = readPlateMapFile(plateMapFile)
+
+// Scan file once to obtain the max and min values for each feature
+// StaticBin1D will, without using much memory, allow you to compute 
+// basic statistics on each feature. (Scan takes ~1m4s for 186k lines)
+// Java version takes 20s, so it's 3x as fast. 
+err.println "Scanning $datafile to find feature max and mins..." 
+featureBins = DataUtils.computeFeatureBins(datafile,skipColumns)
+err.println "Done preprocessing $datafile"
+
+// Go through the file a second time, this time creating histograms 
+// of each feature vs compound+molarity...  apologies for the awkward 
+// set of calling parameters, I just literally cut out a block of code 
+// here and made it a Java function... 
+HashSet<String> CpMSet = new HashSet<String>();
+CpMByFeature = DataUtils.getCpMByFeatureMap(datafile,numBins,featureBins,
+                                            well2compound,well2molarity,
+                                            skipColumns,CpMSet)
+
+err.println "CpMByFeature.size="+CpMByFeature.size()
+err.println "CpMSet.size = "+CpMSet.size()
+
+//============== Write out table ==================
+
+// So now we have an map of CbTByFeature(s) with each element being a 1D bin.... 
+
+// the control compound has a special ID...
+controlCompound = 'Blank_0'
+
+// Write heading
+println "Features,${CpMSet.join(',')}"
+
+// Write out the rest of the table...
+features = featureBins.keySet()
+features.each{feature->
+  print "$feature,"
+
+  CpMFeature = "$controlCompound$feature" as String
+
+  // The blank/control distribution doesn't vary with molarity or compound (CpM), 
+  // so only need to compute it's smoothed histogram once per feature... 
+  blankHist = CpMByFeature[CpMFeature]
+  
+  if (blankHist == null) {
+    err.println "blankHist null for $CpMFeature"
+    return; 
+  }
+  
+  bxtemp = (0..<numBins).collect{blankHist.binHeight(it)}     
+  bx = bxtemp as double[]
+  bxsmooth = DataUtils.exponentialSmoothing(bx,0.25)
+  bxnorm = DataUtils.normalize(bxsmooth) // convert to 0-1 values. 
+  
+  // So go through each compound_concentration and compute the statistic
+  // for that experimental distribution compared with the bx blank distribution...  
+  values = [];
+  CpMSet.each{CpM->   
+    
+    // Another nasty cut-and-paste translation of a block of Groovy code...
+    measure = DataUtils.getStatisticForCpM(CpM,CpMByFeature,feature,numBins,
+                                     bxsmooth,bxnorm,measureType)
+    values << measure;        
+  }
+  
+  println "${values.join(",")}" 
+}      
+
+
+
+/******************************************************************/
+/*************************  Methods *******************************/
+/******************************************************************/
+
+
+/********
+* Read the platemap file in as a pair of maps, one from WellName to compound
+* the other from WellName to molarity.  I look up the columns of the 
+* WellName,Compound, and Molarity to make the code dependent only on the 
+* heading names and not on the actual heading orders. 
+*/ 
+def readPlateMapFile(plateMapFile){
+  
+  def well2compound = [:]
+  def well2molarity = [:]
+  
+  new File(plateMapFile).withReader{r->
+    headings = r.readLine().split(",")  
+    
+    headings2ColMap = DataUtils.makeColMap(headings)
+        
+    wellIdx = headings2ColMap[WellHeadingCol]
+    compoundIdx = headings2ColMap[CompoundHeadingCol]
+    molarityIdx = headings2ColMap[ConcentrationHeadingCol]
+        
+    r.splitEachLine(","){fields->          
+      
+      well = fields[wellIdx]
+      compound = fields[compoundIdx]
+      molarity = fields[molarityIdx]
+      
+      //println "well2compound[$well] = $compound"
+      //println "well2compound[$well] = $molarity"
+      
+      well2compound[well] = compound
+      well2molarity[well] = molarity
+    }    
+  }  
+  return([well2compound,well2molarity])  
+}
+
+
+/*
+14m36.172s  with IXM490
+
+*/

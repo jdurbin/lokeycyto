@@ -1,0 +1,54 @@
+#!/usr/bin/env groovy 
+
+// A lot of the features end up coming out all zero.  Since these are completely 
+// uninformative, this script removes all zero lines from the file.  While we 
+// are at it, it's another chance to add columns that we want to omit for 
+// whatever other reason (I say columns, they are rows now...)
+
+
+// Use like: cleanupCompoundByFeatureTable IXM405.histdiff.csv > IXM405.histdiff2.csv
+fileName = args[0]
+
+
+skipColumns = [
+
+  // These features are clearly uninformative, like CellID, or PlateID. 
+ 'OrientationIMASummary','CellID','Instance','PlateID',
+ 'RunSettingsID','SeriesID','SiteID','WellName','WellX','WellY',
+ 
+ // These seem to be uninformative, but it's not obvious from their name...
+ 'CellVesicleCountTransfluor','CellVesicleAverageIntensityTransfluor',
+ 'CellVesicleIntegratedIntensityTransfluor','CellVesicleTotalAreaTransfluor',
+ 'CellScoringProfileMultiWaveScoring',
+ 'LaserfocusscoreMultiWaveScoring', 
+ 'LaserfocusscoreTransfluor', 
+ 'LaserfocusscoreMicronuclei',
+ 'CentroidYIMASummary', 
+ 'CentroidXIMASummary'
+ ] as Set
+
+
+
+new File(fileName).withReader{r->
+  heading = r.readLine();
+  println heading
+  r.splitEachLine(","){fields->
+    keepline = false;
+    rowName = fields[0]
+    
+    // If it's something we want to skip, skip it...
+    if (skipColumns.contains(rowName)) {
+      System.err.println "Omitting skipColumn $rowName"
+      return;
+    }
+    
+    // [1,-1] returns a range of fields... here 1 to -1, where -1 is 
+    // the index counting back from the end.  
+    fields[1,-1].each{f->
+      // Any non-zero values marks line as a keeper. 
+      if ((f as double) != 0) keepline = true;
+    }
+    if (keepline) println fields.join(",")
+    else System.err.println "Omitting all zero line ${rowName}"
+  }    
+}

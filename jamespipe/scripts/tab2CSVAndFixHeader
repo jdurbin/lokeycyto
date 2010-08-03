@@ -24,6 +24,11 @@ new File(dataFile).withReader{r->
 /* 
 Takes about 1 minute for the 495k line file  */
 
+/* Took about 
+
+11m35.410s for 8,305,400 line file. 
+
+*/ 
 
 /* 
 replacing special characters piecemeal...

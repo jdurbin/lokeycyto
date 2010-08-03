@@ -1,0 +1,96 @@
+#!/usr/bin/env groovy 
+
+import com.google.common.collect.*;
+
+err = System.err
+
+/**
+* For some strange reason, the data file splits up cell specific information
+* across several rows.  This program simply combines all information for a given
+* Cell ID into a single row.  It differs from mergeCellRows in that it assumes
+* that the file has already been sorted by CellID (not true unless you sort it
+* I don't think). mergeCellRows does eveything in RAM and may run out of space. 
+*
+* Input (absolutely must be sorted by CellID already): 
+* 
+* Attr1,Attr2,Attr3,CellID,Attr4,Attr5
+*  1  , 2   , 3    ,  5    ,     ,
+*     , 2   , 3    ,  5    ,   6 ,
+*     , 2   ,      ,  5    ,     , 7
+*  11 , 12   , 13  ,  7    ,     ,
+*     , 12   , 13  ,  7    ,  16 ,
+*     , 12   ,     ,  7    ,     , 17
+*
+* Output:
+*
+* Attr1,Attr2,Attr3,CellID,Attr4,Attr5
+*  1  , 2   , 3   ,  5    ,   6 , 7 
+*  11 , 12  , 13  ,  7    ,  16 ,17
+* 
+*/ 
+dataFile = args[0]
+
+cellID2Row = [:]
+heading2IdxMap = [:]
+def row
+
+new File(dataFile).withReader{r->
+  
+  headings = r.readLine().split(",")
+  headings.eachWithIndex{h,i->heading2IdxMap[h] = i}
+  cellIDIdx = heading2IdxMap['CellID']
+  
+  // Output the headings...
+  println headings.join(",")
+  
+  // Go through the fields on each line...
+  def currentCellID = null
+  def isFirstTime = true;
+  
+  r.splitEachLine(","){fields->
+    cellID = fields[cellIDIdx]
+  
+    if (currentCellID != cellID){
+      // Either it's the first time through the loop, or 
+      // we've reached a new cellID, either way we create a 
+      // new row...
+      if (isFirstTime){
+        isFirstTime = false;
+      }else{
+        println row.join(",")
+      }
+      
+      // Init row with the existing fields, set new currentCellID...
+      row = fields;      
+      currentCellID = cellID
+      
+    }else{
+      // Walk through the fields, plopping new entries into existing
+      // row...      
+      fields.eachWithIndex{field,i->
+        // Sanity test...
+        if (field != ""){
+          if ((row[i] != "") && (row[i] != field)){
+            err.println "ERROR: row[$i]=${row[i]} and $field both non null"
+          }else{
+            row[i] = field
+          }
+        }                
+      }
+    } // else existing row
+  } // each line of file    
+}
+
+// Whatever is left is a row also...
+println row.join(",")
+
+
+
+/***
+foo.sort.csv is sorted version of IXM399... 439MB
+time ./scripts/mergeSortedCellRows foo.sort.csv > foo.merged.csv 
+
+real	1m57.428s
+user	1m39.260s
+sys	0m7.830s
+*/

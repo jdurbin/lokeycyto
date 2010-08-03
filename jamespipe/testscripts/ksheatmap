@@ -16,10 +16,10 @@ library("ctc")      # cluster and tree conversion... to save cdt files, etc.
 #outFileThumb = args[4]
 #clusterOut = args[5]
 
-fileName = "/Users/kdurbin/ucsc/cytological/Data/Control/newpiperesults/bob.csv"
+fileName = "/Users/james/ucsc/cyto/IMX/IXM490/IXM490.fxc.csv"
 #title = "LY294002 Titration/Control Kolmogorov-Smirnov Pr"
-outFile = paste("bob/heat",".pdf",sep="")
-outFileThumb = paste("bob/heat",".tn.png",sep="") 
+outFile = paste("fooheat",".pdf",sep="")
+outFileThumb = paste("fooheat",".tn.png",sep="") 
 clusterOut = "cluster.cdt"
 
 outFile

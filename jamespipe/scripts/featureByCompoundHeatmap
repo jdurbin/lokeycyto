@@ -1,0 +1,47 @@
+#!/usr/bin/env Rscript
+
+# Script uses R to produce a nice heatmap of the given data file. 
+
+library("gplots")   # to get heatmap.2
+library("ctc")      # cluster and tree conversion... to save cdt files, etc.
+
+args = commandArgs(trailingOnly = TRUE)
+
+fileName = args[1]    # Input features by compounds table.
+title = args[2]       # Title for heatmap
+outFile = args[3]     # Name of PDF file output
+cdtFile = args[4]     # Name of CDT file output.  MUST have .cdt suffix. 
+
+#clusterOut = "cdtfiles/foo.cdt"
+
+#fileName = "/Users/james/ucsc/cyto/IXM/processall/IXM466.histdiff2.csv"
+#title = "IXM466"
+
+clusterOut = "cluster.cdt"
+
+ks = read.csv(fileName, sep=",")
+
+row.names(ks) = ks$Features      # Setup row names, needed to show up in heatmap.
+
+ks_matrix = data.matrix(ks)
+nr = nrow(ks_matrix)
+nc = ncol(ks_matrix)
+
+ks_matrix = ks_matrix[,2:nc]     # Omit heading
+
+# Change the main font scaling to be 75% of normal.  
+pdf(outFile)
+par(cex.main=0.75)
+heatmap(ks_matrix, 
+        col=topo.colors(100),    # Use 100 topo colors
+        cexRow=0.25,             # Scale text for row. 
+        cexCol = 0.25,           # Scale text for col. 
+        main=title)
+
+# Now save files needed to browse with a cluster viewer...
+hclust2treeview(ks_matrix,
+                file = cdtFile,
+                method = "euclidean",
+                link = "complete",
+                keep.hclust=FALSE)
+                

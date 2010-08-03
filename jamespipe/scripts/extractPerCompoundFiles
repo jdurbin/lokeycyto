@@ -29,7 +29,6 @@ compounds.each{compound->
   queryToCSV(db,query,fileOutName)
 }
 
-
 /**
 * Perform the sql query and return the results as a list. 
 */ 

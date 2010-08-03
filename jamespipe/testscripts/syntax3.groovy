@@ -1,15 +1,18 @@
 #!/usr/bin/env groovy 
 
+err= System.err
+
+bob = "Hello you!"
+
+myFunction()
 
 
-(v1,v2) = myFun(5)
-
-println v1
-println v2
 
 
 
 
-def myFun(x){
-  return([x+1,x+5])
+def myFunction(){
+  
+  err.println bob
+  
 }
